@@ -77,16 +77,17 @@ pub fn const_int_program(num: u32) win.VirtualAllocError!Program {
     return program;
 }
 
+const MAX_FIXNUM = 0x3fff_ffff;
+const FIXNUM_MASK = 0x0000_0003;
+const FIXNUM_TAG = 0;
+
 pub fn encode_immediate_int(num: u32) u32 {
     std.debug.assert(num <= MAX_FIXNUM);
     return (num << 2) | @as(u32, FIXNUM_TAG);
 }
 
-const MAX_FIXNUM = 0x3fff_ffff;
-const FIXNUM_TAG = 0x0000_0003;
-
 pub fn decode_immediate_int(num: u32) u32 {
-    std.debug.assert(num & @as(u32, FIXNUM_TAG) == @as(u32, FIXNUM_TAG));
+    std.debug.assert(num & @as(u32, FIXNUM_MASK) == @as(u32, FIXNUM_TAG));
     return num >> 2;
 }
 
