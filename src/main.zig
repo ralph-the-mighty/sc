@@ -70,11 +70,24 @@ pub fn const_int_program(num: u32) win.VirtualAllocError!Program {
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(num);
+    program.mov_eax_32(encode_immediate_int(num));
     program.pop_rbp();
     program.ret();
 
     return program;
+}
+
+pub fn encode_immediate_int(num: u32) u32 {
+    std.debug.assert(num <= MAX_FIXNUM);
+    return (num << 2) | @as(u32, FIXNUM_TAG);
+}
+
+const MAX_FIXNUM = 0x3fff_ffff;
+const FIXNUM_TAG = 0x0000_0003;
+
+pub fn decode_immediate_int(num: u32) u32 {
+    std.debug.assert(num & @as(u32, FIXNUM_TAG) == @as(u32, FIXNUM_TAG));
+    return num >> 2;
 }
 
 pub fn main() anyerror!void {
@@ -91,18 +104,25 @@ test "basic function" {
     defer program.deinit();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(42);
+    program.mov_eax_32(encode_immediate_int(42));
     program.pop_rbp();
     program.ret();
 
-    try std.testing.expectEqual(@intCast(u32, 42), program.run());
+    try std.testing.expectEqual(@intCast(u32, 42), decode_immediate_int(program.run()));
 }
 
 test "test mov_eax" {
     var i: usize = 0;
-    while (i < 0xffff_ffff) : (i += 12345) {
+    while (i < MAX_FIXNUM) : (i += 12345) {
         var program = try const_int_program(@intCast(u32, i));
         defer program.deinit();
-        try std.testing.expectEqual(@intCast(u32, i), program.run());
+        try std.testing.expectEqual(@intCast(u32, i), decode_immediate_int(program.run()));
+    }
+}
+
+test "immediate int representation" {
+    var ints = [_]u32{ 0, 1, MAX_FIXNUM };
+    for (ints) |num| {
+        try std.testing.expectEqual(num, decode_immediate_int(encode_immediate_int(num)));
     }
 }
