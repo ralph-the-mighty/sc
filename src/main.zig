@@ -89,6 +89,17 @@ pub fn const_char_program(char: u8) win.VirtualAllocError!Program {
     return program;
 }
 
+pub fn const_bool_program(b: bool) win.VirtualAllocError!Program {
+    var program: Program = Program{ .bytes = undefined, .counter = 0 };
+    try program.init();
+    program.push_rbp();
+    program.mov_rbp_rsp();
+    program.mov_eax_32(encode_immediate_bool(b));
+    program.pop_rbp();
+    program.ret();
+
+    return program;
+}
 // types
 const MAX_FIXNUM = 0x3fff_ffff;
 const FIXNUM_MASK = 0x0000_0003;
@@ -126,11 +137,34 @@ pub fn decode_immediate_char(word: u32) u8 {
     return @truncate(u8, word >> 8);
 }
 
+const MAX_BOOL = 0x0000_0001;
+const BOOL_MASK = 0x0000_007f;
+const BOOL_TAG = 0x1f;
+
+pub fn is_bool(word: u32) bool {
+    return (word & @as(u32, BOOL_MASK)) == @as(u32, BOOL_TAG);
+}
+
+pub fn encode_immediate_bool(b: bool) u32 {
+    return (@as(u32, @boolToInt(b)) << 7) | @as(u32, BOOL_TAG);
+}
+
+pub fn decode_immediate_bool(word: u32) bool {
+    std.debug.assert(is_bool(word));
+    return word >> 7 == 1;
+}
+
 pub fn print(word: u32) void {
-    if (is_char(word)) {
-        std.debug.print("'{c}'\n", .{decode_immediate_char(word)});
+    if (is_bool(word)) {
+        std.debug.print("'{c}'\n", .{decode_immediate_bool(word)});
     } else if (is_int(word)) {
         std.debug.print("{}\n", .{decode_immediate_int(word)});
+    } else if (is_bool(word)) {
+        if (decode_immediate_bool(word)) {
+            std.debug.print("true\n");
+        } else {
+            std.debug.print("false\n");
+        }
     }
 }
 
@@ -150,7 +184,7 @@ test "basic function" {
     program.pop_rbp();
     program.ret();
 
-    try std.testing.expectEqual(@intCast(u32, 42), decode_immediate_int(program.run()));
+    try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u32, 42));
 }
 
 test "test mov_eax" {
@@ -158,20 +192,47 @@ test "test mov_eax" {
     while (i < MAX_FIXNUM) : (i += 12345) {
         var program = try const_int_program(@intCast(u32, i));
         defer program.deinit();
-        try std.testing.expectEqual(@intCast(u32, i), decode_immediate_int(program.run()));
+        try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u32, i));
     }
 }
 
 test "immediate int representation" {
     var ints = [_]u32{ 0, 1, MAX_FIXNUM };
     for (ints) |num| {
-        try std.testing.expectEqual(num, decode_immediate_int(encode_immediate_int(num)));
+        try std.testing.expectEqual(decode_immediate_int(encode_immediate_int(num)), num);
     }
+}
+
+test "const int program" {
+    var program = try const_int_program(42);
+    defer program.deinit();
+    try std.testing.expectEqual(program.run(), encode_immediate_int(42));
 }
 
 test "basic char tests" {
     var char: u8 = 0;
     while (char <= MAX_CHAR) : (char += 1) {
-        try std.testing.expectEqual(char, decode_immediate_char(encode_immediate_char(char)));
+        try std.testing.expectEqual(decode_immediate_char(encode_immediate_char(char)), char);
     }
+}
+
+test "const char program" {
+    var program = try const_char_program('j');
+    defer program.deinit();
+    try std.testing.expectEqual(program.run(), encode_immediate_char('j'));
+}
+
+test "basic bool test" {
+    try std.testing.expectEqual(decode_immediate_bool(encode_immediate_bool(true)), true);
+    try std.testing.expectEqual(decode_immediate_bool(encode_immediate_bool(false)), false);
+}
+
+test "const bool program" {
+    var program = try const_bool_program(true);
+    defer program.deinit();
+    try std.testing.expectEqual(program.run(), encode_immediate_bool(true));
+
+    var program2 = try const_bool_program(false);
+    defer program2.deinit();
+    try std.testing.expectEqual(program2.run(), encode_immediate_bool(false));
 }
