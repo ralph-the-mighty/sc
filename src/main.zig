@@ -119,6 +119,10 @@ pub fn decode_immediate_int(word: u32) u32 {
     return word >> 2;
 }
 
+pub fn I(word: u32) u32 {
+    return encode_immediate_int(word);
+}
+
 const MAX_CHAR = 0x0000_007f;
 const CHAR_MASK = 0x0000_00ff;
 const CHAR_TAG = 0xf;
@@ -137,6 +141,10 @@ pub fn decode_immediate_char(word: u32) u8 {
     return @truncate(u8, word >> 8);
 }
 
+pub fn C(char: u8) u32 {
+    return encode_immediate_char(char);
+}
+
 const MAX_BOOL = 0x0000_0001;
 const BOOL_MASK = 0x0000_007f;
 const BOOL_TAG = 0x1f;
@@ -152,6 +160,10 @@ pub fn encode_immediate_bool(b: bool) u32 {
 pub fn decode_immediate_bool(word: u32) bool {
     std.debug.assert(is_bool(word));
     return word >> 7 == 1;
+}
+
+pub fn B(b: bool) u32 {
+    return encode_immediate_bool(b);
 }
 
 pub fn print(word: u32) void {
@@ -206,7 +218,7 @@ test "immediate int representation" {
 test "const int program" {
     var program = try const_int_program(42);
     defer program.deinit();
-    try std.testing.expectEqual(program.run(), encode_immediate_int(42));
+    try std.testing.expectEqual(program.run(), I(42));
 }
 
 test "basic char tests" {
@@ -219,7 +231,7 @@ test "basic char tests" {
 test "const char program" {
     var program = try const_char_program('j');
     defer program.deinit();
-    try std.testing.expectEqual(program.run(), encode_immediate_char('j'));
+    try std.testing.expectEqual(program.run(), C('j'));
 }
 
 test "basic bool test" {
@@ -230,9 +242,9 @@ test "basic bool test" {
 test "const bool program" {
     var program = try const_bool_program(true);
     defer program.deinit();
-    try std.testing.expectEqual(program.run(), encode_immediate_bool(true));
+    try std.testing.expectEqual(program.run(), B(true));
 
     var program2 = try const_bool_program(false);
     defer program2.deinit();
-    try std.testing.expectEqual(program2.run(), encode_immediate_bool(false));
+    try std.testing.expectEqual(program2.run(), B(false));
 }
