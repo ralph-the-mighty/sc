@@ -77,26 +77,67 @@ pub fn const_int_program(num: u32) win.VirtualAllocError!Program {
     return program;
 }
 
+pub fn const_char_program(char: u8) win.VirtualAllocError!Program {
+    var program: Program = Program{ .bytes = undefined, .counter = 0 };
+    try program.init();
+    program.push_rbp();
+    program.mov_rbp_rsp();
+    program.mov_eax_32(encode_immediate_char(char));
+    program.pop_rbp();
+    program.ret();
+
+    return program;
+}
+
+// types
 const MAX_FIXNUM = 0x3fff_ffff;
 const FIXNUM_MASK = 0x0000_0003;
 const FIXNUM_TAG = 0;
 
-pub fn encode_immediate_int(num: u32) u32 {
-    std.debug.assert(num <= MAX_FIXNUM);
-    return (num << 2) | @as(u32, FIXNUM_TAG);
+pub fn is_int(word: u32) bool {
+    return (word & @as(u32, FIXNUM_MASK)) == @as(u32, FIXNUM_TAG);
 }
 
-pub fn decode_immediate_int(num: u32) u32 {
-    std.debug.assert(num & @as(u32, FIXNUM_MASK) == @as(u32, FIXNUM_TAG));
-    return num >> 2;
+pub fn encode_immediate_int(word: u32) u32 {
+    std.debug.assert(word <= @as(u32, MAX_FIXNUM));
+    return (word << 2) | @as(u32, FIXNUM_TAG);
+}
+
+pub fn decode_immediate_int(word: u32) u32 {
+    std.debug.assert(is_int(word));
+    return word >> 2;
+}
+
+const MAX_CHAR = 0x0000_007f;
+const CHAR_MASK = 0x0000_00ff;
+const CHAR_TAG = 0xf;
+
+pub fn is_char(word: u32) bool {
+    return (word & @as(u32, CHAR_MASK)) == @as(u32, CHAR_TAG);
+}
+
+pub fn encode_immediate_char(char: u8) u32 {
+    std.debug.assert(char <= @as(u8, MAX_CHAR));
+    return (@as(u32, char) << 8) | @as(u32, CHAR_TAG);
+}
+
+pub fn decode_immediate_char(word: u32) u8 {
+    std.debug.assert(is_char(word));
+    return @truncate(u8, word >> 8);
+}
+
+pub fn print(word: u32) void {
+    if (is_char(word)) {
+        std.debug.print("'{c}'\n", .{decode_immediate_char(word)});
+    } else if (is_int(word)) {
+        std.debug.print("{}\n", .{decode_immediate_int(word)});
+    }
 }
 
 pub fn main() anyerror!void {
-    // Note that info level log messages are by default printed only in Debug
-    // and ReleaseSafe build modes.
-    var program = try const_int_program(42);
+    var program = try const_char_program('j');
     defer program.deinit();
-    std.debug.print("{}\n", .{program.run()});
+    print(program.run());
 }
 
 test "basic function" {
@@ -125,5 +166,12 @@ test "immediate int representation" {
     var ints = [_]u32{ 0, 1, MAX_FIXNUM };
     for (ints) |num| {
         try std.testing.expectEqual(num, decode_immediate_int(encode_immediate_int(num)));
+    }
+}
+
+test "basic char tests" {
+    var char: u8 = 0;
+    while (char <= MAX_CHAR) : (char += 1) {
+        try std.testing.expectEqual(char, decode_immediate_char(encode_immediate_char(char)));
     }
 }
