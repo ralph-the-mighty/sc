@@ -173,15 +173,17 @@ pub fn print(word: u32) void {
         std.debug.print("{}\n", .{decode_immediate_int(word)});
     } else if (is_bool(word)) {
         if (decode_immediate_bool(word)) {
-            std.debug.print("true\n");
+            std.debug.print("true\n", .{});
         } else {
-            std.debug.print("false\n");
+            std.debug.print("false\n", .{});
         }
+    } else {
+        std.debug.print("unrecognized type: {b}\n", .{word});
     }
 }
 
 pub fn main() anyerror!void {
-    var program = try const_char_program('j');
+    var program = try const_int_program(42);
     defer program.deinit();
     print(program.run());
 }
