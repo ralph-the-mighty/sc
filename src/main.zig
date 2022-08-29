@@ -20,13 +20,13 @@ const Program = struct {
         self.counter += 1;
     }
 
-    pub fn emit_u32(self: *Program, word: u32) void {
-        self.emit_byte(@truncate(u8, word >> 0) & @intCast(u8, 0xff));
-        self.emit_byte(@truncate(u8, word >> 8) & @intCast(u8, 0xff));
-        self.emit_byte(@truncate(u8, word >> 16) & @intCast(u8, 0xff));
-        self.emit_byte(@truncate(u8, word >> 24) & @intCast(u8, 0xff));
+    pub fn emit_u64(self: *Program, word: u64) void {
+        var i: usize = 0;
+        while (i <= 56) : (i += 8) {
+            const byte: u8 = @truncate(u8, word >> @truncate(u6, i));
+            self.emit_byte(byte);
+        }
     }
-
     pub fn push_rbp(self: *Program) void {
         self.emit_byte(0x55);
     }
@@ -37,17 +37,10 @@ const Program = struct {
         self.emit_byte(0xe5);
     }
 
-    pub fn mov_eax_0x2a(self: *Program) void {
+    pub fn mov_eax_64(self: *Program, int: u64) void {
+        self.emit_byte(0x48);
         self.emit_byte(0xb8);
-        self.emit_byte(0x2a);
-        self.emit_byte(0);
-        self.emit_byte(0);
-        self.emit_byte(0);
-    }
-
-    pub fn mov_eax_32(self: *Program, int: u32) void {
-        self.emit_byte(0xb8);
-        self.emit_u32(int);
+        self.emit_u64(int);
     }
 
     pub fn pop_rbp(self: *Program) void {
@@ -58,19 +51,27 @@ const Program = struct {
         self.emit_byte(0xc3);
     }
 
-    pub fn run(self: *Program) u32 {
-        const fn_ptr = fn () callconv(.C) u32;
+    pub fn print(self: *Program) void {
+        var i: usize = 0;
+        while (i < self.counter) : (i += 1) {
+            std.debug.print("{x:2} ", .{self.bytes[i]});
+        }
+        std.debug.print("\n", .{});
+    }
+
+    pub fn run(self: *Program) u64 {
+        const fn_ptr = fn () callconv(.C) u64;
         const function: fn_ptr = @ptrCast(fn_ptr, self.bytes);
         return function();
     }
 };
 
-pub fn const_int_program(num: u32) win.VirtualAllocError!Program {
+pub fn const_int_program(num: u64) win.VirtualAllocError!Program {
     var program: Program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(encode_immediate_int(num));
+    program.mov_eax_64(encode_immediate_int(num));
     program.pop_rbp();
     program.ret();
 
@@ -82,7 +83,7 @@ pub fn const_char_program(char: u8) win.VirtualAllocError!Program {
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(encode_immediate_char(char));
+    program.mov_eax_64(encode_immediate_char(char));
     program.pop_rbp();
     program.ret();
 
@@ -94,79 +95,79 @@ pub fn const_bool_program(b: bool) win.VirtualAllocError!Program {
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(encode_immediate_bool(b));
+    program.mov_eax_64(encode_immediate_bool(b));
     program.pop_rbp();
     program.ret();
 
     return program;
 }
 // types
-const MAX_FIXNUM = 0x3fff_ffff;
-const FIXNUM_MASK = 0x0000_0003;
+const MAX_FIXNUM = std.math.maxInt(u62);
+const FIXNUM_MASK = 0x0000_0000_0000_0003;
 const FIXNUM_TAG = 0;
 
-pub fn is_int(word: u32) bool {
-    return (word & @as(u32, FIXNUM_MASK)) == @as(u32, FIXNUM_TAG);
+pub fn is_int(word: u64) bool {
+    return (word & @as(u64, FIXNUM_MASK)) == @as(u64, FIXNUM_TAG);
 }
 
-pub fn encode_immediate_int(word: u32) u32 {
-    std.debug.assert(word <= @as(u32, MAX_FIXNUM));
-    return (word << 2) | @as(u32, FIXNUM_TAG);
+pub fn encode_immediate_int(word: u64) u64 {
+    std.debug.assert(word <= @as(u64, MAX_FIXNUM));
+    const x = (word << 2) | @as(u64, FIXNUM_TAG);
+    return x;
 }
 
-pub fn decode_immediate_int(word: u32) u32 {
+pub fn decode_immediate_int(word: u64) u64 {
     std.debug.assert(is_int(word));
     return word >> 2;
 }
 
-pub fn I(word: u32) u32 {
+pub fn I(word: u64) u64 {
     return encode_immediate_int(word);
 }
 
-const MAX_CHAR = 0x0000_007f;
-const CHAR_MASK = 0x0000_00ff;
+const MAX_CHAR = 0x0000_0000_0000_007f;
+const CHAR_MASK = 0x0000_0000_0000_00ff;
 const CHAR_TAG = 0xf;
 
-pub fn is_char(word: u32) bool {
-    return (word & @as(u32, CHAR_MASK)) == @as(u32, CHAR_TAG);
+pub fn is_char(word: u64) bool {
+    return (word & @as(u64, CHAR_MASK)) == @as(u64, CHAR_TAG);
 }
 
-pub fn encode_immediate_char(char: u8) u32 {
+pub fn encode_immediate_char(char: u8) u64 {
     std.debug.assert(char <= @as(u8, MAX_CHAR));
-    return (@as(u32, char) << 8) | @as(u32, CHAR_TAG);
+    return (@as(u64, char) << 8) | @as(u64, CHAR_TAG);
 }
 
-pub fn decode_immediate_char(word: u32) u8 {
+pub fn decode_immediate_char(word: u64) u8 {
     std.debug.assert(is_char(word));
     return @truncate(u8, word >> 8);
 }
 
-pub fn C(char: u8) u32 {
+pub fn C(char: u8) u64 {
     return encode_immediate_char(char);
 }
 
-const MAX_BOOL = 0x0000_0001;
-const BOOL_MASK = 0x0000_007f;
+const BOOL_MASK = 0x0000_0000_0000_007f;
 const BOOL_TAG = 0x1f;
 
-pub fn is_bool(word: u32) bool {
-    return (word & @as(u32, BOOL_MASK)) == @as(u32, BOOL_TAG);
+pub fn is_bool(word: u64) bool {
+    return (word & @as(u64, BOOL_MASK)) == @as(u64, BOOL_TAG);
 }
 
-pub fn encode_immediate_bool(b: bool) u32 {
-    return (@as(u32, @boolToInt(b)) << 7) | @as(u32, BOOL_TAG);
+pub fn encode_immediate_bool(b: bool) u64 {
+    return (@as(u64, @boolToInt(b)) << 7) | @as(u64, BOOL_TAG);
 }
 
-pub fn decode_immediate_bool(word: u32) bool {
+pub fn decode_immediate_bool(word: u64) bool {
     std.debug.assert(is_bool(word));
     return word >> 7 == 1;
 }
 
-pub fn B(b: bool) u32 {
+pub fn B(b: bool) u64 {
     return encode_immediate_bool(b);
 }
 
-pub fn print(word: u32) void {
+pub fn print(word: u64) void {
     if (is_bool(word)) {
         std.debug.print("'{c}'\n", .{decode_immediate_bool(word)});
     } else if (is_int(word)) {
@@ -185,6 +186,7 @@ pub fn print(word: u32) void {
 pub fn main() anyerror!void {
     var program = try const_int_program(42);
     defer program.deinit();
+    program.print();
     print(program.run());
 }
 
@@ -194,24 +196,24 @@ test "basic function" {
     defer program.deinit();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_32(encode_immediate_int(42));
+    program.mov_eax_64(encode_immediate_int(42));
     program.pop_rbp();
     program.ret();
 
-    try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u32, 42));
+    try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u64, 42));
 }
 
 test "test mov_eax" {
-    var i: usize = 0;
-    while (i < MAX_FIXNUM) : (i += 12345) {
-        var program = try const_int_program(@intCast(u32, i));
+    var ints = [_]u64{ 0, 1, MAX_FIXNUM };
+    for (ints) |num| {
+        var program = try const_int_program(@intCast(u64, num));
         defer program.deinit();
-        try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u32, i));
+        try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u64, num));
     }
 }
 
 test "immediate int representation" {
-    var ints = [_]u32{ 0, 1, MAX_FIXNUM };
+    var ints = [_]u64{ 0, 1, MAX_FIXNUM };
     for (ints) |num| {
         try std.testing.expectEqual(decode_immediate_int(encode_immediate_int(num)), num);
     }
