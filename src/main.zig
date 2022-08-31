@@ -89,7 +89,7 @@ const Program = struct {
     pub fn print(self: *Program) void {
         var i: usize = 0;
         while (i < self.counter) : (i += 1) {
-            std.debug.print("{x:2} ", .{self.bytes[i]});
+            std.debug.print("{x:0>2} ", .{self.bytes[i]});
         }
         std.debug.print("\n", .{});
     }
