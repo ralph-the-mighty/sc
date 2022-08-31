@@ -44,6 +44,7 @@ const Program = struct {
         self.emit_u64(int);
     }
 
+    //primatives
     pub fn emit_add1(self: *Program) void {
         self.emit_byte(0x48);
         self.emit_byte(0x83);
@@ -55,6 +56,26 @@ const Program = struct {
         self.emit_byte(0x83);
         self.emit_byte(0xe8);
         self.emit_byte(1 << 2);
+    }
+
+    pub fn emit_integer_to_char(self: *Program) void {
+        //shl rax, 0x6
+        self.emit_byte(0x48);
+        self.emit_byte(0xc1);
+        self.emit_byte(0xe0);
+        self.emit_byte(0x06);
+        //or rax 0xf
+        self.emit_byte(0x48);
+        self.emit_byte(0x83);
+        self.emit_byte(0xc8);
+        self.emit_byte(0x0f);
+    }
+    pub fn emit_char_to_integer(self: *Program) void {
+        //shr rax, 0x6
+        self.emit_byte(0x48);
+        self.emit_byte(0xc1);
+        self.emit_byte(0xe8);
+        self.emit_byte(0x06);
     }
 
     pub fn pop_rbp(self: *Program) void {
@@ -90,6 +111,10 @@ const Program = struct {
                     self.emit_add1();
                 } else if (std.mem.eql(u8, value.name, "sub1")) {
                     self.emit_sub1();
+                } else if (std.mem.eql(u8, value.name, "char->integer")) {
+                    self.emit_char_to_integer();
+                } else if (std.mem.eql(u8, value.name, "integer->char")) {
+                    self.emit_integer_to_char();
                 } else {
                     unreachable;
                 }
@@ -230,8 +255,8 @@ pub fn B(b: bool) u64 {
 }
 
 pub fn print(word: u64) void {
-    if (is_bool(word)) {
-        std.debug.print("'{c}'\n", .{decode_immediate_bool(word)});
+    if (is_char(word)) {
+        std.debug.print("'{c}'\n", .{decode_immediate_char(word)});
     } else if (is_int(word)) {
         std.debug.print("{}\n", .{decode_immediate_int(word)});
     } else if (is_bool(word)) {
@@ -246,13 +271,14 @@ pub fn print(word: u64) void {
 }
 
 pub fn main() anyerror!void {
-    var n = AstNode{ .Int = 64 };
-    var m = AstNode{ .Unary = .{ .name = "add1", .arg = &n } };
+    var n = AstNode{ .Char = 'a' };
+    var m = AstNode{ .Unary = .{ .name = "char->integer", .arg = &n } };
     var o = AstNode{ .Unary = .{ .name = "add1", .arg = &m } };
+    var p = AstNode{ .Unary = .{ .name = "integer->char", .arg = &o } };
     var program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
 
-    program.compile(o);
+    program.compile(p);
     program.print();
     print(program.run());
 }
