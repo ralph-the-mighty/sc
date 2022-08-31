@@ -13,6 +13,7 @@ const Program = struct {
 
     pub fn deinit(self: *Program) void {
         win.VirtualFree(self.bytes, 0, win.MEM_RELEASE);
+        self.counter = 0;
     }
 
     pub fn emit_byte(self: *Program, byte: u8) void {
@@ -37,10 +38,23 @@ const Program = struct {
         self.emit_byte(0xe5);
     }
 
-    pub fn mov_eax_64(self: *Program, int: u64) void {
+    pub fn mov_eax_64_imm(self: *Program, int: u64) void {
         self.emit_byte(0x48);
         self.emit_byte(0xb8);
         self.emit_u64(int);
+    }
+
+    pub fn emit_add1(self: *Program) void {
+        self.emit_byte(0x48);
+        self.emit_byte(0x83);
+        self.emit_byte(0xc0);
+        self.emit_byte(1 << 2);
+    }
+    pub fn emit_sub1(self: *Program) void {
+        self.emit_byte(0x48);
+        self.emit_byte(0x83);
+        self.emit_byte(0xe8);
+        self.emit_byte(1 << 2);
     }
 
     pub fn pop_rbp(self: *Program) void {
@@ -59,6 +73,30 @@ const Program = struct {
         std.debug.print("\n", .{});
     }
 
+    pub fn emit_expr(self: *Program, expr: AstNode) void {
+        switch (expr) {
+            .Int => |value| {
+                self.mov_eax_64_imm(encode_immediate_int(value));
+            },
+            .Bool => |value| {
+                self.mov_eax_64_imm(encode_immediate_bool(value));
+            },
+            .Char => |value| {
+                self.mov_eax_64_imm(encode_immediate_char(value));
+            },
+            .Unary => |value| {
+                self.emit_expr(value.arg.*);
+                if (std.mem.eql(u8, value.name, "add1")) {
+                    self.emit_add1();
+                } else if (std.mem.eql(u8, value.name, "sub1")) {
+                    self.emit_sub1();
+                } else {
+                    unreachable;
+                }
+            },
+        }
+    }
+
     pub fn run(self: *Program) u64 {
         const fn_ptr = fn () callconv(.C) u64;
         const function: fn_ptr = @ptrCast(fn_ptr, self.bytes);
@@ -66,12 +104,25 @@ const Program = struct {
     }
 };
 
+const AstType = enum { Int, Char, Bool, Unary };
+
+const AstNode = union(AstType) { Int: u64, Char: u8, Bool: bool, Unary: struct { name: []const u8, arg: *AstNode } };
+
+test "compile ast" {
+    var n = AstNode{ .Int = 64 };
+    var program = Program{ .bytes = undefined, .counter = 0 };
+    try program.init();
+
+    program.emit_expr(n);
+    try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u64, 64));
+}
+
 pub fn const_int_program(num: u64) win.VirtualAllocError!Program {
     var program: Program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_64(encode_immediate_int(num));
+    program.mov_eax_64_imm(encode_immediate_int(num));
     program.pop_rbp();
     program.ret();
 
@@ -83,7 +134,7 @@ pub fn const_char_program(char: u8) win.VirtualAllocError!Program {
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_64(encode_immediate_char(char));
+    program.mov_eax_64_imm(encode_immediate_char(char));
     program.pop_rbp();
     program.ret();
 
@@ -95,12 +146,13 @@ pub fn const_bool_program(b: bool) win.VirtualAllocError!Program {
     try program.init();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_64(encode_immediate_bool(b));
+    program.mov_eax_64_imm(encode_immediate_bool(b));
     program.pop_rbp();
     program.ret();
 
     return program;
 }
+
 // types
 const MAX_FIXNUM = std.math.maxInt(u62);
 const FIXNUM_MASK = 0x0000_0000_0000_0003;
@@ -196,7 +248,7 @@ test "basic function" {
     defer program.deinit();
     program.push_rbp();
     program.mov_rbp_rsp();
-    program.mov_eax_64(encode_immediate_int(42));
+    program.mov_eax_64_imm(encode_immediate_int(42));
     program.pop_rbp();
     program.ret();
 
