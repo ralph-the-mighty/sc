@@ -97,6 +97,16 @@ const Program = struct {
         }
     }
 
+    pub fn compile(self: *Program, expr: AstNode) void {
+        //prologue
+        self.push_rbp();
+        self.mov_rbp_rsp();
+        self.emit_expr(expr);
+        //epilogue
+        self.pop_rbp();
+        self.ret();
+    }
+
     pub fn run(self: *Program) u64 {
         const fn_ptr = fn () callconv(.C) u64;
         const function: fn_ptr = @ptrCast(fn_ptr, self.bytes);
@@ -236,12 +246,16 @@ pub fn print(word: u64) void {
 }
 
 pub fn main() anyerror!void {
-    var program = try const_int_program(42);
-    defer program.deinit();
+    var n = AstNode{ .Int = 64 };
+    var m = AstNode{ .Unary = .{ .name = "add1", .arg = &n } };
+    var o = AstNode{ .Unary = .{ .name = "add1", .arg = &m } };
+    var program = Program{ .bytes = undefined, .counter = 0 };
+    try program.init();
+
+    program.compile(o);
     program.print();
     print(program.run());
 }
-
 test "basic function" {
     var program: Program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
