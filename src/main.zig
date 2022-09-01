@@ -21,6 +21,13 @@ const Program = struct {
         self.counter += 1;
     }
 
+    pub fn emit_bytes(self: *Program, bytes: []const u8) void {
+        for (bytes) |byte| {
+            self.bytes[self.counter] = byte;
+            self.counter += 1;
+        }
+    }
+
     pub fn emit_u64(self: *Program, word: u64) void {
         var i: usize = 0;
         while (i <= 56) : (i += 8) {
@@ -78,6 +85,19 @@ const Program = struct {
         self.emit_byte(0x06);
     }
 
+    pub fn emit_is_null(self: *Program) void {
+        //cmp rax, 0x2f; null value
+        self.emit_bytes(&.{ 0x48, 0x83, 0xf8, 0x2f });
+        //mov rax, 0x0
+        self.emit_bytes(&.{ 0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00 });
+        //sete al
+        self.emit_bytes(&.{ 0x0f, 0x94, 0xc0 });
+        //shl rax, 0x7
+        self.emit_bytes(&.{ 0x48, 0xc1, 0xe0, 0x07 });
+        //or rax, 0x1f
+        self.emit_bytes(&.{ 0x48, 0x83, 0xc8, 0x1f });
+    }
+
     pub fn pop_rbp(self: *Program) void {
         self.emit_byte(0x5d);
     }
@@ -105,6 +125,9 @@ const Program = struct {
             .Char => |value| {
                 self.mov_eax_64_imm(encode_immediate_char(value));
             },
+            .Null => {
+                self.mov_eax_64_imm(NULL_VALUE);
+            },
             .Unary => |value| {
                 self.emit_expr(value.arg.*);
                 if (std.mem.eql(u8, value.name, "add1")) {
@@ -115,6 +138,8 @@ const Program = struct {
                     self.emit_char_to_integer();
                 } else if (std.mem.eql(u8, value.name, "integer->char")) {
                     self.emit_integer_to_char();
+                } else if (std.mem.eql(u8, value.name, "null?")) {
+                    self.emit_is_null();
                 } else {
                     unreachable;
                 }
@@ -139,9 +164,9 @@ const Program = struct {
     }
 };
 
-const AstType = enum { Int, Char, Bool, Unary };
+const AstType = enum { Int, Char, Bool, Null, Unary };
 
-const AstNode = union(AstType) { Int: u64, Char: u8, Bool: bool, Unary: struct { name: []const u8, arg: *AstNode } };
+const AstNode = union(AstType) { Int: u64, Char: u8, Bool: bool, Null: u64, Unary: struct { name: []const u8, arg: *AstNode } };
 
 test "compile ast" {
     var n = AstNode{ .Int = 64 };
@@ -254,6 +279,16 @@ pub fn B(b: bool) u64 {
     return encode_immediate_bool(b);
 }
 
+const NULL_VALUE = 0x2f;
+
+pub fn is_null(word: u64) bool {
+    return word == @as(u64, NULL_VALUE);
+}
+
+pub fn ast_null() AstNode {
+    return AstNode{ .Null = NULL_VALUE };
+}
+
 pub fn print(word: u64) void {
     if (is_char(word)) {
         std.debug.print("'{c}'\n", .{decode_immediate_char(word)});
@@ -265,6 +300,8 @@ pub fn print(word: u64) void {
         } else {
             std.debug.print("false\n", .{});
         }
+    } else if (is_null(word)) {
+        std.debug.print("(nil)\n", .{});
     } else {
         std.debug.print("unrecognized type: {b}\n", .{word});
     }
@@ -277,11 +314,24 @@ pub fn main() anyerror!void {
     var p = AstNode{ .Unary = .{ .name = "integer->char", .arg = &o } };
     var program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
+    defer program.deinit();
 
     program.compile(p);
     program.print();
     print(program.run());
+
+    var q = ast_null();
+    var r = AstNode{ .Unary = .{ .name = "null?", .arg = &q } };
+    var p2 = Program{ .bytes = undefined, .counter = 0 };
+    try p2.init();
+    defer p2.deinit();
+
+    p2.compile(r);
+    p2.print();
+    std.debug.print("{b}\n", .{p2.run()});
+    print(p2.run());
 }
+
 test "basic function" {
     var program: Program = Program{ .bytes = undefined, .counter = 0 };
     try program.init();
