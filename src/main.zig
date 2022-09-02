@@ -77,12 +77,26 @@ const Program = struct {
         self.emit_byte(0xc8);
         self.emit_byte(0x0f);
     }
+
     pub fn emit_char_to_integer(self: *Program) void {
         //shr rax, 0x6
         self.emit_byte(0x48);
         self.emit_byte(0xc1);
         self.emit_byte(0xe8);
         self.emit_byte(0x06);
+    }
+
+    pub fn emit_is_zero(self: *Program) void {
+        //cmp rax, 0
+        self.emit_bytes(&.{ 0x48, 0x83, 0xf8, 0x00 });
+        //mov rax, 0
+        self.emit_bytes(&.{ 0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00 });
+        //sete al
+        self.emit_bytes(&.{ 0x0f, 0x94, 0xc0 });
+        //shl rax, 0x7
+        self.emit_bytes(&.{ 0x48, 0xc1, 0xe0, 0x07 });
+        //or rax, 0x1f
+        self.emit_bytes(&.{ 0x48, 0x83, 0xc8, 0x1f });
     }
 
     pub fn emit_is_null(self: *Program) void {
@@ -140,6 +154,8 @@ const Program = struct {
                     self.emit_integer_to_char();
                 } else if (std.mem.eql(u8, value.name, "null?")) {
                     self.emit_is_null();
+                } else if (std.mem.eql(u8, value.name, "zero?")) {
+                    self.emit_is_zero();
                 } else {
                     unreachable;
                 }
@@ -157,6 +173,12 @@ const Program = struct {
         self.ret();
     }
 
+    pub fn recompile(self: *Program, expr: AstNode) void {
+        std.mem.set(u8, self.bytes[0..self.counter], 0);
+        self.counter = 0;
+        self.compile(expr);
+    }
+
     pub fn run(self: *Program) u64 {
         const fn_ptr = fn () callconv(.C) u64;
         const function: fn_ptr = @ptrCast(fn_ptr, self.bytes);
@@ -167,51 +189,6 @@ const Program = struct {
 const AstType = enum { Int, Char, Bool, Null, Unary };
 
 const AstNode = union(AstType) { Int: u64, Char: u8, Bool: bool, Null: u64, Unary: struct { name: []const u8, arg: *AstNode } };
-
-test "compile ast" {
-    var n = AstNode{ .Int = 64 };
-    var program = Program{ .bytes = undefined, .counter = 0 };
-    try program.init();
-
-    program.emit_expr(n);
-    try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u64, 64));
-}
-
-pub fn const_int_program(num: u64) win.VirtualAllocError!Program {
-    var program: Program = Program{ .bytes = undefined, .counter = 0 };
-    try program.init();
-    program.push_rbp();
-    program.mov_rbp_rsp();
-    program.mov_eax_64_imm(encode_immediate_int(num));
-    program.pop_rbp();
-    program.ret();
-
-    return program;
-}
-
-pub fn const_char_program(char: u8) win.VirtualAllocError!Program {
-    var program: Program = Program{ .bytes = undefined, .counter = 0 };
-    try program.init();
-    program.push_rbp();
-    program.mov_rbp_rsp();
-    program.mov_eax_64_imm(encode_immediate_char(char));
-    program.pop_rbp();
-    program.ret();
-
-    return program;
-}
-
-pub fn const_bool_program(b: bool) win.VirtualAllocError!Program {
-    var program: Program = Program{ .bytes = undefined, .counter = 0 };
-    try program.init();
-    program.push_rbp();
-    program.mov_rbp_rsp();
-    program.mov_eax_64_imm(encode_immediate_bool(b));
-    program.pop_rbp();
-    program.ret();
-
-    return program;
-}
 
 // types
 const MAX_FIXNUM = std.math.maxInt(u62);
@@ -322,14 +299,29 @@ pub fn main() anyerror!void {
 
     var q = ast_null();
     var r = AstNode{ .Unary = .{ .name = "null?", .arg = &q } };
-    var p2 = Program{ .bytes = undefined, .counter = 0 };
-    try p2.init();
-    defer p2.deinit();
 
-    p2.compile(r);
-    p2.print();
-    std.debug.print("{b}\n", .{p2.run()});
-    print(p2.run());
+    program.recompile(r);
+    program.print();
+    std.debug.print("{b}\n", .{program.run()});
+    print(program.run());
+
+    var a = AstNode{ .Int = 0 };
+    var b = AstNode{ .Unary = .{ .name = "zero?", .arg = &a } };
+
+    program.recompile(b);
+    try std.testing.expectEqual(B(true), program.run());
+
+    a = AstNode{ .Int = 2342 };
+    program.recompile(b);
+}
+
+pub fn test_program(expr: AstNode, expected_value: u64) bool {
+    var program: Program = Program{ .bytes = undefined, .counter = 0 };
+    program.init() catch return false;
+    defer program.deinit();
+
+    program.compile(expr);
+    return program.run() == expected_value;
 }
 
 test "basic function" {
@@ -348,8 +340,15 @@ test "basic function" {
 test "test mov_eax" {
     var ints = [_]u64{ 0, 1, MAX_FIXNUM };
     for (ints) |num| {
-        var program = try const_int_program(@intCast(u64, num));
+        var program: Program = Program{ .bytes = undefined, .counter = 0 };
         defer program.deinit();
+        try program.init();
+        program.push_rbp();
+        program.mov_rbp_rsp();
+        program.mov_eax_64_imm(encode_immediate_int(num));
+        program.pop_rbp();
+        program.ret();
+
         try std.testing.expectEqual(decode_immediate_int(program.run()), @intCast(u64, num));
     }
 }
@@ -361,12 +360,6 @@ test "immediate int representation" {
     }
 }
 
-test "const int program" {
-    var program = try const_int_program(42);
-    defer program.deinit();
-    try std.testing.expectEqual(program.run(), I(42));
-}
-
 test "basic char tests" {
     var char: u8 = 0;
     while (char <= MAX_CHAR) : (char += 1) {
@@ -375,9 +368,7 @@ test "basic char tests" {
 }
 
 test "const char program" {
-    var program = try const_char_program('j');
-    defer program.deinit();
-    try std.testing.expectEqual(program.run(), C('j'));
+    try std.testing.expect(test_program(AstNode{ .Char = 'j' }, C('j')));
 }
 
 test "basic bool test" {
@@ -386,11 +377,30 @@ test "basic bool test" {
 }
 
 test "const bool program" {
-    var program = try const_bool_program(true);
-    defer program.deinit();
-    try std.testing.expectEqual(program.run(), B(true));
+    try std.testing.expect(test_program(AstNode{ .Bool = true }, B(true)));
+    try std.testing.expect(test_program(AstNode{ .Bool = false }, B(false)));
+}
 
-    var program2 = try const_bool_program(false);
-    defer program2.deinit();
-    try std.testing.expectEqual(program2.run(), B(false));
+test "const int test" {
+    try std.testing.expect(test_program(AstNode{ .Int = 42 }, I(42)));
+}
+
+test "null?" {
+    var a = ast_null();
+    var b = AstNode{ .Unary = .{ .name = "null?", .arg = &a } };
+
+    try std.testing.expect(test_program(b, B(true)));
+
+    a = AstNode{ .Int = 42 };
+    try std.testing.expect(test_program(b, B(false)));
+}
+
+test "zero?" {
+    var a = AstNode{ .Int = 0 };
+    var b = AstNode{ .Unary = .{ .name = "zero?", .arg = &a } };
+
+    try std.testing.expect(test_program(b, B(true)));
+
+    a = AstNode{ .Int = 2342 };
+    try std.testing.expect(test_program(b, B(false)));
 }
